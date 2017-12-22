@@ -6,9 +6,12 @@ var async = require('async');
 const cheerio = require('cheerio');
 const rp = require('request-promise');
 var htmlToText = require('html-to-text');
+const mysql = require('mysql');
 
 var app = express();
 var hnFormatted = [];
+var dbValues = [];
+var asyncHnLocationFns = [];
 
 function hackerNewsFormatTimePosted(timeString) {
   let timeArr = timeString.split(' ');
@@ -45,9 +48,17 @@ function hackerNewsFormatTimePosted(timeString) {
     timeArr[0] = timeArr[0] + 'y';
   }
   timeArr.splice(1,1);
-
   return {postTimeStr: timeArr.join(' '), postTimeInMs: postTime}
 }
+
+var connection = mysql.createConnection({
+    host: 'localhost',
+    user: 'root',
+    password: process.env.MYSQL_PASSWORD,
+    database: 'testDB',
+    port: 3306,          //port mysql
+    charset: "utf8mb4"
+});
 
 const options = {
   uri: 'https://news.ycombinator.com/submitted?id=whoishiring',
@@ -57,9 +68,11 @@ const options = {
 rp(options)
 .then(($) => {
   let whoIsHiringLink;
+  let month;
   $('.storylink').each(function(index, value) {
     let text = $(this).text();
     if (text.includes('Who is hiring?')) {
+      month = text.match(/\(.*\)/)[0];
       whoIsHiringLink = 'https://news.ycombinator.com/' + value.attribs.href;
       return false;
     }
@@ -82,47 +95,43 @@ rp(options)
         fullPost = fullPost.html();
         let postTime = $(this).parents().eq(2).find('.age').text();
         let postTimeObj = hackerNewsFormatTimePosted(postTime);
-        hnFormatted.push(
-          {
-            source:"hackerNews",
-            fullPostText:text,
-            descriptionHTML:fullPost,
-            readMore: false,
-            hidden: false,
-            postTimeinMs: postTimeObj.postTimeInMs,
-            postTimeStr: postTimeObj.postTimeStr
-          }
-        );
+        let source = "hackerNews";
+        let fullPostText = text;
+        descriptionHTML = fullPost;
+        let readMore = false;
+        let hidden = false;
+        let postTimeInMs = postTimeObj.postTimeInMs;
+        let postTimeStr = postTimeObj.postTimeStr;
+        let url, compensation, title, type, location;
         if ($($(this).contents()[1]).attr('href')) {
-          hnFormatted[hnFormatted.length -1].url = $($(this).contents()[1]).attr('href');
+          url = $($(this).contents()[1]).attr('href');
           descriptionText = $($(this).contents().slice(2)).text();
         }
         else {
           descriptionText = $($(this).contents().slice(1)).text();
         }
-        hnFormatted[hnFormatted.length -1].companyName = listingInfo.shift();
-        hnFormatted[hnFormatted.length -1].descriptionText = descriptionText;
+        let companyName = listingInfo.shift();
         while (i < listingInfo.length) {
           if (listingInfo[i].includes('http')) {
-            hnFormatted[hnFormatted.length -1].url = listingInfo.splice(i, 1);
+            url = listingInfo.splice(i, 1);
           }
           else if (/%|salary|€|\$|£|[0-9][0-9]k/.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].compensation = listingInfo.splice(i, 1)[0];
+            compensation = listingInfo.splice(i, 1)[0];
           }
-          else if (/position|engineer|developer|senior|junior|scientist|analyst/i.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].title = listingInfo.splice(i, 1)[0];
+          else if (/position|engineer|developer|senior|junior|scientist|analyst/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+            title = listingInfo.splice(i, 1)[0];
           }
-          else if (/permanent|intern|flexible|remote|on\W*site|part\Wtime|full\Wtime|full/i.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].type = listingInfo.splice(i, 1)[0];
+          else if (/permanent|intern|flexible|remote|on\W*site|part\Wtime|full\Wtime|full/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+            type = listingInfo.splice(i, 1)[0];
           }
-          else if (/boston|seattle|london|new york|san francisco|bay area|nyc|sf/i.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].location = listingInfo.splice(i, 1)[0];
+          else if (/boston|seattle|london|new york|san francisco|bay area|nyc|sf/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+            location = listingInfo.splice(i, 1)[0];
           }
-          else if (/\W\W[A-Z][a-zA-Z]/.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].location = listingInfo.splice(i, 1)[0];
+          else if (/\W\W[A-Z][a-zA-Z]/.test(listingInfo[i]) && listingInfo[i].length < 200) {
+            location = listingInfo.splice(i, 1)[0];
           }
-          else if (/[a-z]\.[a-z]/i.test(listingInfo[i])) {
-            hnFormatted[hnFormatted.length -1].url = "http://" + listingInfo.splice(i, 1)[0];
+          else if (/[a-z]\.[a-z]/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+            url = "http://" + listingInfo.splice(i, 1)[0];
           }
           else if (listingInfo[i] === " ") {
             listingInfo.splice(i, 1);
@@ -131,19 +140,90 @@ rp(options)
             i++;
           }
         }
-        let indexHnFormatted = hnFormatted.length -1;
-        if (hnFormatted[hnFormatted.length -1].location) {
-          let location = hnFormatted[indexHnFormatted].location.replace(/[^a-zA-Z0-9-_]/g, ' ')
-        }
-        else {
-          hnFormatted[indexHnFormatted].distance = false;
-        }
+        dbValues.push([
+          month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location
+        ]);
+        let j = dbValues.length - 1;
+        if (location && index < 20) {
+           asyncHnLocationFns.push(
+             (callback) => {
+               let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, ' ')
+               let geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" + locationFormatted + "&key=AIzaSyAFco2ZmRw5uysFTC4Eck6zXdltYMwb4jk";
+               fetch(encodeURI(geocodeUrl), {
+                 method: 'GET'
+               })
+               .then(res => res.json())
+               .catch(e => {
+                 console.log(e);
+               })
+               .then(data => {
+                 if (!data.results[0]) {
+                   console.log(data);
+                   dbValues[j].push(false);
+                   dbValues[j].push(false);
+                 }
+                 else {
+                   dbValues[j].push(data.results[0].geometry.location.lat);
+                   dbValues[j].push(data.results[0].geometry.location.lng);
+                 }
+                 callback();
+               })
+               .catch(e => {
+                 console.log(e);
+               });
+             }
+           );
+         }
+         else {
+           dbValues[j].push(false);
+           dbValues[j].push(false);
+         }
         // if (listingInfo.length > 0) {
-        //   console.log(listingInfo);
+        //   (listingInfo);
         // }
       }
     });
-    console.log('yay');
+    let i = 0;
+    let asyncHnLocationFnBatches = [];
+    while (i < asyncHnLocationFns.length) {
+      let end;
+      if (i + 40 > asyncHnLocationFns.length) {
+        end = asyncHnLocationFns.length;
+      }
+      else {
+        end = i + 40;
+      }
+      let shortAsyncHnLocationFns = asyncHnLocationFns.slice(i, end);
+      i = end;
+      asyncHnLocationFnBatches.push(
+        (callback) => {
+          async.parallel(asyncHnLocationFns, function(err, results) {
+            callback();
+          });
+        }
+      );
+      asyncHnLocationFnBatches.push(
+        (callback) => {
+          setTimeout(
+            () => {
+              callback();
+            }, 1000
+          );
+        }
+      );
+    }
+    async.series(asyncHnLocationFnBatches, function(err, results) {
+      let queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location, latitude, longitude) VALUES ?"
+      connection.query(queryString, [dbValues], function (error,row) {
+        if (!error) {
+          console.log('success!');
+        }
+        else {
+          console.log("Query Error: "+error);
+        }
+      });
+      connection.end();
+    });
   })
   .catch((err) => {
     console.log(err);
