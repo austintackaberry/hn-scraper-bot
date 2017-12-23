@@ -144,7 +144,7 @@ rp(options)
           month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location
         ]);
         let j = dbValues.length - 1;
-        if (location && index < 20) {
+        if (location) {
            asyncHnLocationFns.push(
              (callback) => {
                let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, ' ')
@@ -187,17 +187,17 @@ rp(options)
     let asyncHnLocationFnBatches = [];
     while (i < asyncHnLocationFns.length) {
       let end;
-      if (i + 40 > asyncHnLocationFns.length) {
+      if (i + 48 > asyncHnLocationFns.length) {
         end = asyncHnLocationFns.length;
       }
       else {
-        end = i + 40;
+        end = i + 48;
       }
       let shortAsyncHnLocationFns = asyncHnLocationFns.slice(i, end);
       i = end;
       asyncHnLocationFnBatches.push(
         (callback) => {
-          async.parallel(asyncHnLocationFns, function(err, results) {
+          async.parallel(shortAsyncHnLocationFns, function(err, results) {
             callback();
           });
         }
@@ -213,7 +213,18 @@ rp(options)
       );
     }
     async.series(asyncHnLocationFnBatches, function(err, results) {
-      let queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location, latitude, longitude) VALUES ?"
+
+      let queryString = 'TRUNCATE `testDB`.`hackerNewsListings`';
+      connection.query(queryString, [dbValues], function (error,row) {
+        if (!error) {
+          console.log('table cleared!');
+        }
+        else {
+          console.log("Query Error: "+error);
+        }
+      });
+
+      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location, latitude, longitude) VALUES ?"
       connection.query(queryString, [dbValues], function (error,row) {
         if (!error) {
           console.log('success!');
