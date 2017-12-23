@@ -23,34 +23,20 @@ function hackerNewsFormatTimePosted(timeString) {
 
   if (timeArr[1] == 'seconds') {
     postTime -= timeArr[0]*1000;
-    timeArr[0] = timeArr[0] + 's';
   }
   else if (timeArr[1] == 'minutes') {
     postTime -= timeArr[0]*60*1000;
-    timeArr[0] = timeArr[0] + 'min';
   }
   else if (timeArr[1] == 'hours') {
     postTime -= timeArr[0]*60*60*1000;
-    timeArr[0] = timeArr[0] + 'h';
   }
   else if (timeArr[1] == 'days') {
     postTime -= timeArr[0]*24*60*60*1000;
-    if (parseInt(timeArr[0]) < 7) {
-      timeArr[0] = timeArr[0] + 'd';
-    }
-    else if (parseInt(timeArr[0]) < 30) {
-      timeArr[0] = Math.round(parseInt(timeArr[0])/7.0).toString() + 'w';
-    }
-    else {
-      timeArr[0] = Math.round(parseInt(timeArr[0])/30.4).toString() + 'mon';
-    }
   }
   if (timeArr[1] == 'years') {
     postTime -= timeArr[0]*365*24*60*60*1000;
-    timeArr[0] = timeArr[0] + 'y';
   }
-  timeArr.splice(1,1);
-  return {postTimeStr: timeArr.join(' '), postTimeInMs: postTime}
+  return postTime;
 }
 
 var connection = mysql.createConnection({
@@ -96,14 +82,10 @@ rp(options)
         fullPost.find('.reply').remove();
         fullPost = fullPost.html();
         let postTime = $(this).parents().eq(2).find('.age').text();
-        let postTimeObj = hackerNewsFormatTimePosted(postTime);
+        let postTimeInMs = hackerNewsFormatTimePosted(postTime);
         let source = "hackerNews";
         let fullPostText = text;
         descriptionHTML = fullPost;
-        let readMore = false;
-        let hidden = false;
-        let postTimeInMs = postTimeObj.postTimeInMs;
-        let postTimeStr = postTimeObj.postTimeStr;
         let url, compensation, title, type, location;
         if ($($(this).contents()[1]).attr('href')) {
           url = $($(this).contents()[1]).attr('href');
@@ -143,7 +125,7 @@ rp(options)
           }
         }
         dbValues.push([
-          month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location
+          month, source, fullPostText, descriptionHTML, postTimeInMs, companyName, url, compensation, title, type, location
         ]);
         let j = dbValues.length - 1;
         if (location) {
@@ -226,7 +208,7 @@ rp(options)
         }
       });
 
-      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, readMore, hidden, postTimeInMs, postTimeStr, url, compensation, title, type, location, latitude, longitude) VALUES ?"
+      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?"
       connection.query(queryString, [dbValues], function (error,row) {
         if (!error) {
           console.log('success!');
