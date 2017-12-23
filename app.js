@@ -52,10 +52,10 @@ function hackerNewsFormatTimePosted(timeString) {
 }
 
 var connection = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
+    host: 'austintackaberry-jobsort.c3tu2houar8w.us-west-1.rds.amazonaws.com',
+    user: 'austintackaberry',
     password: process.env.MYSQL_PASSWORD,
-    database: 'testDB',
+    database: 'jobsortdb',
     port: 3306,          //port mysql
     charset: "utf8mb4"
 });
@@ -214,7 +214,7 @@ rp(options)
     }
     async.series(asyncHnLocationFnBatches, function(err, results) {
 
-      let queryString = 'TRUNCATE `testDB`.`hackerNewsListings`';
+      let queryString = 'TRUNCATE `jobsortdb`.`hackerNewsListings`';
       connection.query(queryString, [dbValues], function (error,row) {
         if (!error) {
           console.log('table cleared!');
