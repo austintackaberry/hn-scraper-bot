@@ -125,7 +125,7 @@ rp(options)
           }
         }
         dbValues.push([
-          month, source, fullPostText, descriptionHTML, postTimeInMs, companyName, url, compensation, title, type, location
+          month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location
         ]);
         let j = dbValues.length - 1;
         if (location) {
@@ -208,7 +208,7 @@ rp(options)
         }
       });
 
-      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?"
+      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?"
       connection.query(queryString, [dbValues], function (error,row) {
         if (!error) {
           console.log('success!');
