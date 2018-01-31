@@ -204,7 +204,7 @@ function getDbValues($, results, month) {
       let latitude = false;
       let longitude = false;
       results.some((rowFromDB) => {
-        let fullPostTestFromDB = new Buffer(rowFromDB.location).toString('utf8')
+        let fullPostTestFromDB = new Buffer(rowFromDB.fullPostText).toString('utf8')
         if (fullPostTestFromDB === fullPostText) {
           latitude = rowFromDB.latitude;
           longitude = rowFromDB.longitude;
@@ -214,7 +214,7 @@ function getDbValues($, results, month) {
       })
 
       let j = dbValues.length - 1;
-      if (location && !latitude) {
+      if (location && latitude !== false) {
         geocodeFns.push(async function(){
           let data = await getGeocodeFetchData(location);
           if (!data.results[0]) {
@@ -229,12 +229,9 @@ function getDbValues($, results, month) {
           return Promise.resolve(true);
         });
       }
-      else if (!latitude) {
-        dbValues[j].push(false);
-        dbValues[j].push(false);
-      }
       else {
-        console.log('yay it worked?');
+        dbValues[j].push(latitude);
+        dbValues[j].push(longitude);
       }
       // console.log(dbValues[j].length);
       // if (listingInfo.length > 0) {
