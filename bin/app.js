@@ -13,7 +13,8 @@ const mysql = require('mysql');
 var app = express();
 var hnFormatted = [];
 var dbValues = [];
-var asyncHnLocationFns = [];
+var geocodeFns = [];
+let asyncHnLocationFnBatches = [];
 
 function hackerNewsFormatTimePosted(timeString) {
   let timeArr = timeString.split(' ');
@@ -48,15 +49,73 @@ var connection = mysql.createConnection({
     charset: "utf8mb4"
 });
 
-const options = {
-  uri: 'https://news.ycombinator.com/submitted?id=whoishiring',
-  transform: (body) => {return cheerio.load(body);}
-};
+function setUpGeocodeFns() {
+  let i = 0;
+  while (i < geocodeFns.length) {
+    let end;
+    if (i + 48 > geocodeFns.length) {
+      end = geocodeFns.length;
+    }
+    else {
+      end = i + 48;
+    }
+    let shortGeocodeFns = geocodeFns.slice(i, end);
+    i = end;
+    asyncHnLocationFnBatches.push(async function() {
+      let shortGeocode = await Promise.all(shortGeocodeFns.map(async (fn) => {await fn();}));
+      return Promise.resolve(true);
+    });
+    asyncHnLocationFnBatches.push(async function() {
+      return new Promise((resolve, reject) => {
+        setTimeout(
+          () => {
+            resolve(true);
+          }, 1000
+        );
+      });
+    });
+  }
+}
 
-rp(options)
-.then(($) => {
-  let whoIsHiringLink;
+async function runGeocodeFns() {
+  for (let fn of asyncHnLocationFnBatches) {
+    await fn();
+  }
+  return Promise.resolve(true);
+}
+
+async function clearDatabase() {
+  return new Promise((resolve, reject) => {
+    const queryStringTruncate = 'TRUNCATE `jobsortdb`.`hackerNewsListings`';
+    connection.query(queryStringTruncate, [dbValues], function (error,row) {
+      if (!error) {
+        resolve(true);
+      }
+      else {
+        reject("TRUNCATE Query Error: " + error);
+      }
+    });
+  })
+}
+
+async function insertIntoDatabase() {
+  return new Promise((resolve, reject) => {
+    const queryStringInsert = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?"
+    connection.query(queryStringInsert, [dbValues], function (error,row) {
+      if (!error) {
+        console.log('success!');
+        resolve(true);
+      }
+      else {
+        reject("INSERT Query Error: " + error);
+      }
+    });
+  })
+}
+
+function getLatestWhoIsHiringLink($) {
   let month;
+  let whoIsHiringLink;
   $('.storylink').each(function(index, value) {
     let text = $(this).text();
     if (text.includes('Who is hiring?')) {
@@ -65,165 +124,156 @@ rp(options)
       return false;
     }
   });
-  const options = {
-    uri: whoIsHiringLink,
-    transform: (body) => {return cheerio.load(body);}
-  };
-  rp(options)
-  .then(($) => {
-    $('.c00').each(function(index, value) {
-      let text = $(this).text();
-      let topLine = $($(this).contents()[0]).text();
-      let listingInfo = topLine.split("|");
-      if (listingInfo.length > 1) {
-        let i = 0;
-        let descriptionHTML;
-        let fullPost = $(this);
-        fullPost.find('.reply').remove();
-        fullPost = fullPost.html();
-        let postTime = $(this).parents().eq(2).find('.age').text();
-        let postTimeInMs = hackerNewsFormatTimePosted(postTime);
-        let source = "hackerNews";
-        let fullPostText = text;
-        descriptionHTML = fullPost;
-        let url, compensation, title, type, location;
-        if ($($(this).contents()[1]).attr('href')) {
-          url = $($(this).contents()[1]).attr('href');
-          descriptionText = $($(this).contents().slice(2)).text();
-        }
-        else {
-          descriptionText = $($(this).contents().slice(1)).text();
-        }
-        let companyName = listingInfo.shift();
-        while (i < listingInfo.length) {
-          if (listingInfo[i].includes('http')) {
-            url = listingInfo.splice(i, 1);
-          }
-          else if (/%|salary|€|\$|£|[0-9][0-9]k/.test(listingInfo[i])) {
-            compensation = listingInfo.splice(i, 1)[0];
-          }
-          else if (/position|engineer|developer|senior|junior|scientist|analyst/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
-            title = listingInfo.splice(i, 1)[0];
-          }
-          else if (/permanent|intern|flexible|remote|on\W*site|part\Wtime|full\Wtime|full/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
-            type = listingInfo.splice(i, 1)[0];
-          }
-          else if (/boston|seattle|london|new york|san francisco|bay area|nyc|sf/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
-            location = listingInfo.splice(i, 1)[0];
-          }
-          else if (/\W\W[A-Z][a-zA-Z]/.test(listingInfo[i]) && listingInfo[i].length < 200) {
-            location = listingInfo.splice(i, 1)[0];
-          }
-          else if (/[a-z]\.[a-z]/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
-            url = "http://" + listingInfo.splice(i, 1)[0];
-          }
-          else if (listingInfo[i] === " ") {
-            listingInfo.splice(i, 1);
-          }
-          else {
-            i++;
-          }
-        }
-        dbValues.push([
-          month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location
-        ]);
-        let j = dbValues.length - 1;
-        if (location) {
-           asyncHnLocationFns.push(
-             (callback) => {
-               let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, ' ')
-               let geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" + locationFormatted + "&key=AIzaSyAFco2ZmRw5uysFTC4Eck6zXdltYMwb4jk";
-               fetch(encodeURI(geocodeUrl), {
-                 method: 'GET'
-               })
-               .then(res => res.json())
-               .catch(e => {
-                 console.log(e);
-               })
-               .then(data => {
-                 if (!data.results[0]) {
-                   console.log(data);
-                   dbValues[j].push(false);
-                   dbValues[j].push(false);
-                 }
-                 else {
-                   dbValues[j].push(data.results[0].geometry.location.lat);
-                   dbValues[j].push(data.results[0].geometry.location.lng);
-                 }
-                 callback();
-               })
-               .catch(e => {
-                 console.log(e);
-               });
-             }
-           );
-         }
-         else {
-           dbValues[j].push(false);
-           dbValues[j].push(false);
-         }
-        // if (listingInfo.length > 0) {
-        //   (listingInfo);
-        // }
-      }
-    });
-    let i = 0;
-    let asyncHnLocationFnBatches = [];
-    while (i < asyncHnLocationFns.length) {
-      let end;
-      if (i + 48 > asyncHnLocationFns.length) {
-        end = asyncHnLocationFns.length;
+  return {whoIsHiringLink:whoIsHiringLink, month:month};
+}
+
+async function callSelectQuery() {
+  return new Promise(function(resolve, reject) {
+    const queryStringSelect = 'SELECT latitude, longitude, fullPostText FROM jobsortdb.hackerNewsListings';
+    connection.query(queryStringSelect, function (error, results, fields) {
+      if (!error) {
+        resolve(results);
       }
       else {
-        end = i + 48;
+        reject("SELECT Query Error: " + error)
       }
-      let shortAsyncHnLocationFns = asyncHnLocationFns.slice(i, end);
-      i = end;
-      asyncHnLocationFnBatches.push(
-        (callback) => {
-          async.parallel(shortAsyncHnLocationFns, function(err, results) {
-            callback();
-          });
-        }
-      );
-      asyncHnLocationFnBatches.push(
-        (callback) => {
-          setTimeout(
-            () => {
-              callback();
-            }, 1000
-          );
-        }
-      );
-    }
-    async.series(asyncHnLocationFnBatches, function(err, results) {
-
-      let queryString = 'TRUNCATE `jobsortdb`.`hackerNewsListings`';
-      connection.query(queryString, [dbValues], function (error,row) {
-        if (!error) {
-          console.log('table cleared!');
-        }
-        else {
-          console.log("Query Error: "+error);
-        }
-      });
-
-      queryString = "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?"
-      connection.query(queryString, [dbValues], function (error,row) {
-        if (!error) {
-          console.log('success!');
-        }
-        else {
-          console.log("Query Error: "+error);
-        }
-      });
-      connection.end();
     });
-  })
-  .catch((err) => {
-    console.log(err);
   });
-})
-.catch((err) => {
-  console.log(err);
-});
+}
+
+
+function getDbValues($, results, month) {
+  $('.c00').each(function(index, value) {
+    let text = $(this).text();
+    let topLine = $($(this).contents()[0]).text();
+    let listingInfo = topLine.split("|");
+    if (listingInfo.length > 1) {
+      let i = 0;
+      let descriptionHTML;
+      let fullPost = $(this);
+      fullPost.find('.reply').remove();
+      fullPost = fullPost.html();
+      let postTime = $(this).parents().eq(2).find('.age').text();
+      let postTimeInMs = hackerNewsFormatTimePosted(postTime);
+      let source = "hackerNews";
+      let fullPostText = text;
+      descriptionHTML = fullPost;
+      let url, compensation, title, type;
+      let location = false;
+      if ($($(this).contents()[1]).attr('href')) {
+        url = $($(this).contents()[1]).attr('href');
+        descriptionText = $($(this).contents().slice(2)).text();
+      }
+      else {
+        descriptionText = $($(this).contents().slice(1)).text();
+      }
+      let companyName = listingInfo.shift();
+      while (i < listingInfo.length) {
+        if (listingInfo[i].includes('http')) {
+          url = listingInfo.splice(i, 1);
+        }
+        else if (/%|salary|€|\$|£|[0-9][0-9]k/.test(listingInfo[i])) {
+          compensation = listingInfo.splice(i, 1)[0];
+        }
+        else if (/position|engineer|developer|senior|junior|scientist|analyst/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+          title = listingInfo.splice(i, 1)[0];
+        }
+        else if (/permanent|intern|flexible|remote|on\W*site|part\Wtime|full\Wtime|full/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+          type = listingInfo.splice(i, 1)[0];
+        }
+        else if (/boston|seattle|london|new york|san francisco|bay area|nyc|sf/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+          location = listingInfo.splice(i, 1)[0];
+        }
+        else if (/\W\W[A-Z][a-zA-Z]/.test(listingInfo[i]) && listingInfo[i].length < 200) {
+          location = listingInfo.splice(i, 1)[0];
+        }
+        else if (/[a-z]\.[a-z]/i.test(listingInfo[i]) && listingInfo[i].length < 200) {
+          url = "http://" + listingInfo.splice(i, 1)[0];
+        }
+        else if (listingInfo[i] === " ") {
+          listingInfo.splice(i, 1);
+        }
+        else {
+          i++;
+        }
+      }
+
+      dbValues.push([
+        month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location
+      ]);
+      let latitude = false;
+      let longitude = false;
+      results.some((rowFromDB) => {
+        let fullPostTestFromDB = new Buffer(rowFromDB.location).toString('utf8')
+        if (fullPostTestFromDB === fullPostText) {
+          latitude = rowFromDB.latitude;
+          longitude = rowFromDB.longitude;
+          return true;
+        }
+        return false;
+      })
+
+      let j = dbValues.length - 1;
+      if (location && !latitude) {
+        geocodeFns.push(async function(){
+          let data = await getGeocodeFetchData(location);
+          if (!data.results[0]) {
+            console.log(data);
+            dbValues[j].push(false);
+            dbValues[j].push(false);
+          }
+          else {
+            dbValues[j].push(data.results[0].geometry.location.lat);
+            dbValues[j].push(data.results[0].geometry.location.lng);
+          }
+          return Promise.resolve(true);
+        });
+      }
+      else if (!latitude) {
+        dbValues[j].push(false);
+        dbValues[j].push(false);
+      }
+      else {
+        console.log('yay it worked?');
+      }
+      // console.log(dbValues[j].length);
+      // if (listingInfo.length > 0) {
+      //   (listingInfo);
+      // }
+    }
+  });
+  return true;
+}
+
+async function getGeocodeFetchData(location) {
+  let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, ' ')
+  let geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" + locationFormatted + "&key=AIzaSyAFco2ZmRw5uysFTC4Eck6zXdltYMwb4jk";
+  const fetchRes = await fetch(encodeURI(geocodeUrl), {
+    method: 'GET'
+  });
+  const response = await fetchRes.json();
+  return response;
+}
+
+async function updateDatabase() {
+  let options = {
+    uri: 'https://news.ycombinator.com/submitted?id=whoishiring',
+    transform: (body) => {return cheerio.load(body);}
+  };
+  let $ = await rp(options);
+  const firstPageDetails = getLatestWhoIsHiringLink($);
+  options = {
+    uri: firstPageDetails.whoIsHiringLink,
+    transform: (body) => {return cheerio.load(body);}
+  };
+  $ = await rp(options);
+  const results = await callSelectQuery();
+  getDbValues($, results, firstPageDetails.month);
+  setUpGeocodeFns();
+  await runGeocodeFns();
+  await clearDatabase();
+  await insertIntoDatabase();
+  connection.end();
+}
+
+updateDatabase();

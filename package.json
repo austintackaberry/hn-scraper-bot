@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "node app.js"
+    "start": "cd bin && node app.js"
   },
   "dependencies": {
     "async": "^2.6.0",
