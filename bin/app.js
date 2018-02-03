@@ -205,7 +205,7 @@ function getDbValues($, results, month) {
       let longitude = false;
       results.some((rowFromDB) => {
         let fullPostTestFromDB = new Buffer(rowFromDB.fullPostText).toString('utf8')
-        if (fullPostTestFromDB === fullPostText) {
+        if (fullPostTestFromDB === fullPostText && rowFromDB.latitude !== 0) {
           latitude = rowFromDB.latitude;
           longitude = rowFromDB.longitude;
           return true;
@@ -214,7 +214,7 @@ function getDbValues($, results, month) {
       })
 
       let j = dbValues.length - 1;
-      if (location && latitude !== false) {
+      if (location && latitude === false) {
         geocodeFns.push(async function(){
           let data = await getGeocodeFetchData(location);
           if (!data.results[0]) {
