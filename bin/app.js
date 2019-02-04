@@ -270,7 +270,9 @@ async function getGeocodeFetchData(location) {
   }
   try {
     let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, " ");
-    let geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${locationFormatted}&key=AIzaSyAFco2ZmRw5uysFTC4Eck6zXdltYMwb4jk`;
+    let geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${locationFormatted}&key=${
+      process.env.GOOGLE_API_KEY
+    }`;
     const fetchRes = await fetch(encodeURI(geocodeUrl), {
       method: "GET"
     });

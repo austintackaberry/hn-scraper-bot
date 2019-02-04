@@ -134,7 +134,6 @@ const callSelectQuery = async function callSelectQuery() {
         reject(err);
       } else {
         console.log("Received all documents...");
-        console.log({ data });
         resolve(data.Items);
       }
     });
