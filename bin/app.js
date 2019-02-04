@@ -244,7 +244,7 @@ function getDbValues($, results, month) {
       if (!longitude || !latitude) {
         geocodeFns.push(async function() {
           let data = await getGeocodeFetchData(location);
-          if (!data.results[0]) {
+          if (!data.results[0] && data.status) {
             console.log(data);
             nextVal.latitude = null;
             nextVal.longitude = null;
