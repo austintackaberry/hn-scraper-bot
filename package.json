@@ -6,7 +6,7 @@
     "start": "cd bin && node app.js"
   },
   "dependencies": {
-    "async": "^2.6.0",
+    "aws-sdk": "^2.395.0",
     "body-parser": "~1.18.2",
     "cheerio": "^1.0.0-rc.2",
     "debug": "~2.6.9",
@@ -15,8 +15,10 @@
     "jade": "~1.11.0",
     "morgan": "~1.9.0",
     "node-fetch": "^1.7.3",
-    "node-mysql": "^0.4.2",
     "request": "^2.83.0",
     "request-promise": "^4.2.2"
+  },
+  "devDependencies": {
+    "eslint": "^5.13.0"
   }
 }
