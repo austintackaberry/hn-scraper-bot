@@ -156,7 +156,7 @@ function getDbValues($, results, month) {
       let fullPostText = text;
       descriptionHTML = fullPost;
       let url, compensation, title, type;
-      let location = false;
+      let location = null;
       if ($($(this).contents()[1]).attr("href")) {
         url = $($(this).contents()[1]).attr("href");
         descriptionText = $(
