@@ -1,16 +1,11 @@
 var fetch = require("node-fetch");
 const cheerio = require("cheerio");
 const rp = require("request-promise");
-const mysql = require("mysql");
-
-var connection = mysql.createConnection({
-  host: "austintackaberry-jobsort.c3tu2houar8w.us-west-1.rds.amazonaws.com",
-  user: "austintackaberry",
-  password: process.env.MYSQL_PASSWORD,
-  database: "jobsortdb",
-  port: 3306,
-  charset: "utf8mb4"
-});
+const {
+  callSelectQuery,
+  clearDatabase,
+  insertIntoDatabase
+} = require("./database");
 
 updateDatabase();
 
@@ -30,19 +25,23 @@ async function updateDatabase() {
     }
   };
   $ = await rp(options);
-  const results = await callSelectQuery();
+  let results;
+  console.log("Getting all current documents...");
+  try {
+    results = await callSelectQuery();
+  } catch (err) {
+    console.log(err);
+  }
+  console.log("Getting data from hacker news...");
   const { dbValues, geocodeFns } = getDbValues(
     $,
     results,
     firstPageDetails.month
   );
-  console.log("First dbValue length: ", dbValues[0].length);
   console.log("Generating geocode fns...");
   const asyncHnLocationFnBatches = setUpGeocodeFns(geocodeFns);
-  console.log("First dbValue length: ", dbValues[0].length);
   console.log("Executing geocode fns...");
-  await runGeocodeFns(asyncHnLocationFnBatches, dbValues);
-  console.log("First dbValue length: ", dbValues[0].length);
+  await runGeocodeFns(asyncHnLocationFnBatches);
   console.log("Clearing db...");
   await clearDatabase(dbValues);
   console.log("Inserting values into db...");
@@ -51,7 +50,6 @@ async function updateDatabase() {
   } catch (err) {
     console.log(err);
   }
-  connection.end();
 }
 
 // HELPER FUNCTIONS
@@ -120,45 +118,6 @@ async function runGeocodeFns(asyncHnLocationFnBatches) {
   }
 }
 
-async function clearDatabase(dbValues) {
-  try {
-    return new Promise((resolve, reject) => {
-      const queryStringTruncate = "TRUNCATE `jobsortdb`.`hackerNewsListings`";
-      connection.query(queryStringTruncate, [dbValues], function(error) {
-        if (!error) {
-          resolve(true);
-        } else {
-          reject(`TRUNCATE Query Error: ${error}`);
-        }
-      });
-    });
-  } catch (err) {
-    console.log(err);
-  }
-}
-
-async function insertIntoDatabase(dbValues) {
-  const fixedDbValues = dbValues.map(val => {
-    if (val.length === 12) {
-      console.log("There was a whoopsy");
-      return [...val, null, null];
-    }
-    return val;
-  });
-  return new Promise((resolve, reject) => {
-    const queryStringInsert =
-      "INSERT INTO hackerNewsListings (month, source, fullPostText, descriptionHTML, descriptionText, postTimeInMs, companyName, url, compensation, title, type, location, latitude, longitude) VALUES ?";
-    connection.query(queryStringInsert, [fixedDbValues], function(error) {
-      if (!error) {
-        console.log("success!");
-        resolve(true);
-      } else {
-        reject(`INSERT Query Error: ${error}`);
-      }
-    });
-  });
-}
-
 function getLatestWhoIsHiringLink($) {
   let month;
   let whoIsHiringLink;
@@ -171,24 +130,6 @@ function getLatestWhoIsHiringLink($) {
     }
   });
   return { whoIsHiringLink: whoIsHiringLink, month: month };
-}
-
-async function callSelectQuery() {
-  try {
-    return new Promise(function(resolve, reject) {
-      const queryStringSelect =
-        "SELECT latitude, longitude, fullPostText FROM jobsortdb.hackerNewsListings";
-      connection.query(queryStringSelect, function(error, results) {
-        if (!error) {
-          resolve(results);
-        } else {
-          reject(`SELECT Query Error: ${error}`);
-        }
-      });
-    });
-  } catch (err) {
-    console.log(err);
-  }
 }
 
 function getDbValues($, results, month) {
@@ -273,7 +214,7 @@ function getDbValues($, results, month) {
           i++;
         }
       }
-      dbValues.push([
+      const nextVal = {
         month,
         source,
         fullPostText,
@@ -286,7 +227,7 @@ function getDbValues($, results, month) {
         title,
         type,
         location
-      ]);
+      };
       let validRow = {};
       results.some(rowFromDB => {
         let fullPostTestFromDB = new Buffer(rowFromDB.fullPostText).toString(
@@ -300,30 +241,33 @@ function getDbValues($, results, month) {
       });
       const { latitude = null, longitude = null } = validRow;
 
-      let j = dbValues.length - 1;
       if (!longitude || !latitude) {
         geocodeFns.push(async function() {
           let data = await getGeocodeFetchData(location);
           if (!data.results[0]) {
             console.log(data);
-            dbValues[j].push(null);
-            dbValues[j].push(null);
+            nextVal.latitude = null;
+            nextVal.longitude = null;
           } else {
-            dbValues[j].push(data.results[0].geometry.location.lat);
-            dbValues[j].push(data.results[0].geometry.location.lng);
+            nextVal.latitude = data.results[0].geometry.location.lat;
+            nextVal.longitude = data.results[0].geometry.location.lng;
           }
           return Promise.resolve(true);
         });
       } else {
-        dbValues[j].push(latitude);
-        dbValues[j].push(longitude);
+        nextVal.latitude = latitude;
+        nextVal.longitude = longitude;
       }
+      dbValues.push(nextVal);
     }
   });
   return { dbValues, geocodeFns };
 }
 
 async function getGeocodeFetchData(location) {
+  if (!location) {
+    return { results: [] };
+  }
   try {
     let locationFormatted = location.replace(/[^a-zA-Z0-9-_]/g, " ");
     let geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${locationFormatted}&key=AIzaSyAFco2ZmRw5uysFTC4Eck6zXdltYMwb4jk`;
